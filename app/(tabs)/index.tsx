@@ -1,81 +1,95 @@
 import React, { useState } from 'react';
 import {
-  Button,
-  KeyboardAvoidingView,
-  Platform,
+  ActivityIndicator,
   SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
-  View,
+  TouchableOpacity
 } from 'react-native';
 
-export default function HomeScreen() {
-  const [scenario, setScenario] = useState('');
+export default function App() {
+  const [inputText, setInputText] = useState('');
+  const [result, setResult] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = () => {
+  const getIpcSections = async () => {
+    if (!inputText.trim()) return;
+
     setLoading(true);
-    // Send to backend logic here
+    setResult('');
+
+    try {
+      const response = await fetch('http://<your ip>/analyze', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ scenario: inputText }),
+      });
+
+      const data = await response.json();
+      setResult(data.result || 'No response from server.');
+    } catch (error) {
+      setResult('❌ Error fetching IPC data');
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
-        style={styles.keyboardContainer}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <ScrollView contentContainerStyle={styles.content}>
-          <Text style={styles.title}>Describe the Crime Scenario:</Text>
-          <TextInput
-            value={scenario}
-            onChangeText={setScenario}
-            placeholder="E.g., A man broke into a house and stole..."
-            placeholderTextColor="#aaa"
-            multiline
-            style={styles.input}
-          />
-        </ScrollView>
+      <Text style={styles.heading}>Indian IPC Analyzer</Text>
 
-        <View style={styles.footer}>
-          <Button
-            title={loading ? 'Analyzing...' : 'Get IPC Sections'}
-            onPress={handleSubmit}
-            disabled={loading}
-          />
-        </View>
-      </KeyboardAvoidingView>
+      <TextInput
+        style={styles.input}
+        placeholder="Describe the crime scenario..."
+        multiline
+        value={inputText}
+        onChangeText={setInputText}
+      />
+
+      <TouchableOpacity style={styles.button} onPress={getIpcSections}>
+        <Text style={styles.buttonText}>Get IPC Sections</Text>
+      </TouchableOpacity>
+
+      {loading ? (
+        <ActivityIndicator size="large" color="#007AFF" />
+      ) : (
+        <ScrollView style={styles.resultBox}>
+          <Text style={styles.resultText}>{result}</Text>
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f4f4f4' },
-  keyboardContainer: { flex: 1 },
-  content: {
-    padding: 20,
-    flexGrow: 1,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: '600',
-    marginBottom: 10,
-  },
+  container: { flex: 1, padding: 20, backgroundColor: '#fff' },
+  heading: { fontSize: 22, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
   input: {
+    height: 120,
     borderColor: '#ccc',
     borderWidth: 1,
-    borderRadius: 10,
-    padding: 12,
-    minHeight: 120,
-    fontSize: 16,
-    color: '#000',
-    backgroundColor: '#fff',
+    padding: 10,
+    textAlignVertical: 'top',
+    borderRadius: 8,
+    marginBottom: 15,
   },
-  footer: {
+  button: {
+    backgroundColor: '#007AFF',
     padding: 15,
-    borderTopColor: '#ddd',
-    borderTopWidth: 1,
-    backgroundColor: '#fff',
+    borderRadius: 8,
+    marginBottom: 20,
   },
+  buttonText: { color: '#fff', textAlign: 'center', fontWeight: 'bold' },
+  resultBox: {
+    flex: 1,
+    backgroundColor: '#f1f1f1',
+    padding: 15,
+    borderRadius: 8,
+  },
+  resultText: { fontSize: 16, color: '#333' },
 });
