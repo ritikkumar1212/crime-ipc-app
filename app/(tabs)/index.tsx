@@ -21,7 +21,7 @@ export default function App() {
     setResult('');
 
     try {
-      const response = await fetch('http://<your ip>/analyze', {
+      const response = await fetch('https://ipc-backend-j3ux.onrender.com/analyze', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
