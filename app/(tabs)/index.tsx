@@ -21,7 +21,7 @@ export default function App() {
     setResult('');
 
     try {
-      const response = await fetch('http://<your ip>/analyze', {
+      const response = await fetch('https://ipc-backend-j3ux.onrender.com/analyze', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -32,7 +32,7 @@ export default function App() {
       const data = await response.json();
       setResult(data.result || 'No response from server.');
     } catch (error) {
-      setResult('❌ Error fetching IPC data');
+      setResult('❌ Error fetching BNS data');
       console.error(error);
     } finally {
       setLoading(false);
@@ -41,7 +41,7 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.heading}>Indian IPC Analyzer</Text>
+      <Text style={styles.heading}>BNS Analyzer</Text>
 
       <TextInput
         style={styles.input}
@@ -52,7 +52,7 @@ export default function App() {
       />
 
       <TouchableOpacity style={styles.button} onPress={getIpcSections}>
-        <Text style={styles.buttonText}>Get IPC Sections</Text>
+        <Text style={styles.buttonText}>Get BNS Sections</Text>
       </TouchableOpacity>
 
       {loading ? (
