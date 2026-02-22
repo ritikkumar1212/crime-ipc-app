@@ -4,7 +4,6 @@ import {
   ActivityIndicator,
   Animated,
   Platform,
-  SafeAreaView,
   StatusBar,
   ScrollView,
   StyleSheet,
@@ -15,6 +14,7 @@ import {
   useColorScheme,
   View
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function App() {
   const systemScheme = useColorScheme();
@@ -27,12 +27,29 @@ export default function App() {
   const [result, setResult] = useState('');
   const [loading, setLoading] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const resultCacheRef = useRef<Record<string, string>>({});
-  const inFlightRef = useRef<Record<string, Promise<string>>>({});
+  const resultCacheRef = useRef<Record<string, string | undefined>>({});
+  const inFlightRef = useRef<Record<string, Promise<string> | undefined>>({});
   const slideAnim = useMemo(() => new Animated.Value(0), []);
 
   const theme = useMemo(() => getTheme(themeMode), [themeMode]);
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const analyzeEndpoint = useMemo(() => {
+    const deployedEndpoint = 'https://ipc-backend-j3ux.onrender.com/analyze';
+    const envDefault = process.env.EXPO_PUBLIC_ANALYZE_URL;
+
+    // Production APK should always hit deployed backend unless explicitly overridden.
+    if (!__DEV__) {
+      return process.env.EXPO_PUBLIC_ANALYZE_URL_PROD || deployedEndpoint;
+    }
+
+    if (Platform.OS === 'web') {
+      return process.env.EXPO_PUBLIC_ANALYZE_URL_WEB || envDefault || 'http://localhost:3000/analyze';
+    }
+    if (Platform.OS === 'android') {
+      return process.env.EXPO_PUBLIC_ANALYZE_URL_ANDROID || envDefault || 'http://10.0.2.2:3000/analyze';
+    }
+    return envDefault || deployedEndpoint;
+  }, []);
 
   const buildCacheKey = (
     role: 'self' | 'witness',
@@ -100,21 +117,48 @@ export default function App() {
     const scenarioText = buildScenarioPrompt(role, audience, analysisType, normalizedInput);
 
     const requestPromise = (async () => {
-      const response = await fetch('https://ipc-backend-j3ux.onrender.com/analyze', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ scenario: scenarioText }),
-      });
+      let response: Response;
+      try {
+        response = await fetch(analyzeEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            scenario: normalizedInput,
+            role,
+            audienceMode: audience,
+            analysisType,
+            frontendPrompt: scenarioText,
+          }),
+        });
+      } catch {
+        return `Error: Failed to reach backend at ${analyzeEndpoint}. Ensure backend is running.`;
+      }
 
-      const data = await response.json();
-      const cleanedResult = stripIpcMentions(data.result || 'No response from server.');
+      let data: { result?: string; error?: string } = {};
+      try {
+        data = await response.json();
+      } catch {
+        return `Error: Invalid server response (${response.status}).`;
+      }
+
+      if (!response.ok) {
+        return `Error: ${data.error || `Server request failed (${response.status}).`}`;
+      }
+
+      if (!data.result || !data.result.trim()) {
+        return 'Error: No response from server.';
+      }
+
+      const cleanedResult = stripIpcMentions(data.result);
       resultCacheRef.current[cacheKey] = cleanedResult;
       return cleanedResult;
     })();
 
     inFlightRef.current[cacheKey] = requestPromise;
+    // Prevent dev red-screen from transient unhandled rejection timing.
+    requestPromise.catch(() => {});
     requestPromise.finally(() => {
       delete inFlightRef.current[cacheKey];
     });
@@ -166,8 +210,9 @@ export default function App() {
       setResult(primaryResult);
       prefetchOtherAnalyses(activeRole, activeAudience, analysisType, normalizedInput);
     } catch (error) {
-      setResult('❌ Error fetching BNS data');
-      console.error(error);
+      console.log('Analyze request failed:', error);
+      const message = error instanceof Error ? error.message : 'Error fetching BNS data.';
+      setResult(`Error: ${message}`);
     } finally {
       setLoading(false);
     }
@@ -212,8 +257,7 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle={themeMode === 'dark' ? 'light-content' : 'dark-content'} />
-
+      <StatusBar hidden={true} translucent />
       <View style={styles.menuContainer}>
         <TouchableOpacity
           style={styles.menuButton}
@@ -303,11 +347,8 @@ export default function App() {
           </Text>
           <Text style={styles.subheading}>
             {audienceMode === 'professional'
-              ? 'Draft facts and receive formal legal analysis in English'
+              ? 'Draft facts and receive formal legal analysis'
               : 'Draft a scenario and receive legal help fast'}
-          </Text>
-          <Text style={styles.modePill}>
-            {audienceMode === 'professional' ? 'Legal Professional Interface' : 'General Public Interface'}
           </Text>
         </View>
 
@@ -566,11 +607,11 @@ const createStyles = (theme: ReturnType<typeof getTheme>) =>
       alignSelf: 'center',
       flex: 1,
       paddingHorizontal: 20,
-      paddingTop: 18,
+      paddingTop: Platform.select({ android: 10, default: 14 }),
     },
     menuContainer: {
       position: 'absolute',
-      top: 16,
+      top: Platform.select({ android: 26, default: 14 }),
       left: 16,
       zIndex: 10,
     },
@@ -664,19 +705,6 @@ const createStyles = (theme: ReturnType<typeof getTheme>) =>
       textAlign: 'center',
       maxWidth: 320,
       fontFamily: Platform.select({ ios: 'Avenir Next', android: 'sans-serif-light' }),
-    },
-    modePill: {
-      fontSize: 11,
-      color: theme.accent,
-      fontWeight: '700',
-      letterSpacing: 0.4,
-      borderWidth: 1,
-      borderColor: theme.border,
-      backgroundColor: theme.surfaceAlt,
-      paddingVertical: 5,
-      paddingHorizontal: 10,
-      borderRadius: 999,
-      fontFamily: Platform.select({ ios: 'Avenir Next', android: 'sans-serif-medium' }),
     },
     card: {
       backgroundColor: theme.surface,
