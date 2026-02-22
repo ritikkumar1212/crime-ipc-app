@@ -33,8 +33,23 @@ export default function App() {
 
   const theme = useMemo(() => getTheme(themeMode), [themeMode]);
   const styles = useMemo(() => createStyles(theme), [theme]);
-  const analyzeEndpoint =
-    process.env.EXPO_PUBLIC_ANALYZE_URL || 'https://ipc-backend-j3ux.onrender.com/analyze';
+  const analyzeEndpoint = useMemo(() => {
+    const deployedEndpoint = 'https://ipc-backend-j3ux.onrender.com/analyze';
+    const envDefault = process.env.EXPO_PUBLIC_ANALYZE_URL;
+
+    // Production APK should always hit deployed backend unless explicitly overridden.
+    if (!__DEV__) {
+      return process.env.EXPO_PUBLIC_ANALYZE_URL_PROD || deployedEndpoint;
+    }
+
+    if (Platform.OS === 'web') {
+      return process.env.EXPO_PUBLIC_ANALYZE_URL_WEB || envDefault || 'http://localhost:3000/analyze';
+    }
+    if (Platform.OS === 'android') {
+      return process.env.EXPO_PUBLIC_ANALYZE_URL_ANDROID || envDefault || 'http://10.0.2.2:3000/analyze';
+    }
+    return envDefault || deployedEndpoint;
+  }, []);
 
   const buildCacheKey = (
     role: 'self' | 'witness',
@@ -102,19 +117,24 @@ export default function App() {
     const scenarioText = buildScenarioPrompt(role, audience, analysisType, normalizedInput);
 
     const requestPromise = (async () => {
-      const response = await fetch(analyzeEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          scenario: normalizedInput,
-          role,
-          audienceMode: audience,
-          analysisType,
-          frontendPrompt: scenarioText,
-        }),
-      });
+      let response: Response;
+      try {
+        response = await fetch(analyzeEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            scenario: normalizedInput,
+            role,
+            audienceMode: audience,
+            analysisType,
+            frontendPrompt: scenarioText,
+          }),
+        });
+      } catch {
+        return `Error: Failed to reach backend at ${analyzeEndpoint}. Ensure backend is running.`;
+      }
 
       let data: { result?: string; error?: string } = {};
       try {
