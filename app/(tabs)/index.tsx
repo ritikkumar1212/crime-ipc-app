@@ -159,21 +159,6 @@ export default function App() {
     return requestPromise;
   };
 
-  const prefetchOtherAnalyses = (
-    role: 'self' | 'witness',
-    audience: 'general',
-    selectedType: 'sections' | 'punishments' | 'next_steps',
-    normalizedInput: string
-  ) => {
-    ANALYSIS_TYPES.filter((type) => type !== selectedType).forEach((type) => {
-      const key = buildCacheKey(role, audience, type, normalizedInput);
-      if (resultCacheRef.current[key] || inFlightRef.current[key]) return;
-      void fetchAnalysis(role, audience, type, normalizedInput).catch(() => {
-        // Silently ignore background prefetch failures.
-      });
-    });
-  };
-
   const getIpcSections = async (
     analysisType: 'sections' | 'punishments' | 'next_steps'
   ) => {
@@ -187,7 +172,6 @@ export default function App() {
     const cached = resultCacheRef.current[cacheKey];
     if (cached) {
       setResult(cached);
-      prefetchOtherAnalyses(activeRole, activeAudience, analysisType, normalizedInput);
       return;
     }
 
@@ -195,14 +179,18 @@ export default function App() {
     setResult('');
 
     try {
-      const primaryResult = await fetchAnalysis(
-        activeRole,
-        activeAudience,
-        analysisType,
-        normalizedInput
+      // First click loads all analysis types in one go so tab switching stays instant.
+      const bundleEntries = await Promise.all(
+        ANALYSIS_TYPES.map(async (type) => {
+          const value = await fetchAnalysis(activeRole, activeAudience, type, normalizedInput);
+          return [type, value] as const;
+        })
       );
-      setResult(primaryResult);
-      prefetchOtherAnalyses(activeRole, activeAudience, analysisType, normalizedInput);
+      const bundle = Object.fromEntries(bundleEntries) as Record<
+        (typeof ANALYSIS_TYPES)[number],
+        string
+      >;
+      setResult(bundle[analysisType] || 'Error: No response from server.');
     } catch (error) {
       console.log('Analyze request failed:', error);
       const message = error instanceof Error ? error.message : 'Error fetching BNS data.';
@@ -423,6 +411,7 @@ export default function App() {
               <Text style={styles.resultHeadingLine}>{structuredResult.title}</Text>
               {structuredResult.items.map((item, index) => {
                 const highlighted = splitSectionLead(item);
+                const leadByColon = splitLeadByColon(item);
                 return (
                   <View key={`item-${index}`} style={styles.resultItemRow}>
                     <Text style={styles.resultBullet}>-</Text>
@@ -434,6 +423,16 @@ export default function App() {
                         </Text>
                       ) : (
                         <Text style={styles.resultText}>{highlighted.detail}</Text>
+                      )
+                    ) : selectedAnalysisType === 'punishments' ||
+                      selectedAnalysisType === 'next_steps' ? (
+                      leadByColon.highlight ? (
+                        <Text style={styles.resultText}>
+                          <Text style={styles.resultLead}>{leadByColon.lead}</Text>
+                          {leadByColon.detail ? `: ${leadByColon.detail}` : ''}
+                        </Text>
+                      ) : (
+                        <Text style={styles.resultText}>{item}</Text>
                       )
                     ) : (
                       <Text style={styles.resultText}>{item}</Text>
@@ -570,13 +569,28 @@ const focusAnalysisResult = (
 
 const splitSectionLead = (item: string) => {
   const normalizedItem = item.replace(/\s+/g, ' ').trim();
-  const sectionMatch = normalizedItem.match(/^(section|charge)\s*[0-9A-Za-z./()-]+/i);
+  const sectionMatch = normalizedItem.match(
+    /^(?:section(?:\s*no\.?)?|charge)\s*[:\-]?\s*[0-9][0-9A-Za-z./()-]*/i
+  );
   if (!sectionMatch) {
     return { lead: '', detail: normalizedItem, highlight: false };
   }
   const lead = sectionMatch[0].trim();
   const detail = normalizedItem.slice(lead.length).trim().replace(/^[:\-]\s*/, '');
   return { lead, detail, highlight: true };
+};
+
+const splitLeadByColon = (item: string) => {
+  const normalizedItem = item.replace(/\s+/g, ' ').trim();
+  const colonIndex = normalizedItem.indexOf(':');
+  if (colonIndex <= 0 || colonIndex > 42) {
+    return { lead: '', detail: normalizedItem, highlight: false };
+  }
+  return {
+    lead: normalizedItem.slice(0, colonIndex).trim(),
+    detail: normalizedItem.slice(colonIndex + 1).trim(),
+    highlight: true,
+  };
 };
 
 const buildStructuredResult = (
@@ -654,7 +668,7 @@ const buildStructuredResult = (
   const lines = normalizedText.split('\n').map(normalizeLine).filter(Boolean);
   const contentLines = lines.filter((line) => !isHeadingLine(line)).map(cleanGeneralLine).filter(Boolean);
 
-  const sectionPattern = /\bsection\s*([0-9A-Za-z./()-]+)\b/i;
+  const sectionPattern = /\bsection(?:\s*no\.?)?\s*[:\-]?\s*([0-9][0-9A-Za-z./()-]*)\b/i;
   const reasonPattern = /\b(kyun|kyunki|isliye|lagu hota hai|because|applies)\b/i;
   const punishmentPattern = /\b(saza|jail|fine|imprisonment|years?)\b/i;
   const actionPattern = /\b(police|fir|report|evidence|medical|witness|safety|turant|immediate|step|karein|karna chahiye)\b/i;
@@ -663,7 +677,7 @@ const buildStructuredResult = (
     const entries: Array<{ number: string; title: string; reason: string; punishment: string }> = [];
     for (let i = 0; i < contentLines.length; i += 1) {
       const line = contentLines[i];
-      const regexMatch = /section\s*([0-9A-Za-z./()-]+)/i.exec(line);
+      const regexMatch = sectionPattern.exec(line);
       if (!regexMatch) continue;
 
       const number = regexMatch[1];
@@ -739,7 +753,10 @@ const buildStructuredResult = (
           ) ||
           '';
         if (!punish) return '';
-        return `Section ${entry.number}: ${punish.replace(/^section\s*[0-9A-Za-z./()-]+\s*[:\-]?\s*/i, '')}`;
+        return `Section ${entry.number}: ${punish.replace(
+          /^section(?:\s*no\.?)?\s*[:\-]?\s*[0-9][0-9A-Za-z./()-]*\s*[:\-]?\s*/i,
+          ''
+        )}`;
       })
       .filter(Boolean);
 
@@ -755,12 +772,13 @@ const buildStructuredResult = (
   }
 
   if (analysisType === 'next_steps') {
-    const items = uniqueItems(
+    const actionItems = uniqueItems(
       contentLines
         .filter((line) => actionPattern.test(line))
         .slice(0, 8)
         .map((line) => line.replace(/^[-:\s]+/, '').trim())
     );
+    const items = actionItems.map((line, index) => `Step ${index + 1}: ${line}`);
     return {
       title: 'Ab Kya Karein',
       items: items.length ? items : ['Is scenario ke liye clear actionable steps nahi mile.'],

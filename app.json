@@ -4,7 +4,7 @@
     "slug": "ipc-law-assistant",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/app icon.jpeg",
+    "icon": "./assets/images/final icon deadcenter.png",
     "scheme": "ipclawassistant",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -13,7 +13,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/app icon.jpeg",
+        "foregroundImage": "./assets/images/final icon deadcenter.png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
