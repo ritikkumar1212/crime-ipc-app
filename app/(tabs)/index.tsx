@@ -473,12 +473,27 @@ export default function App() {
 
                 const colonIndex = line.indexOf(':');
                 const hasLeadHeading = colonIndex > 0 && colonIndex < 45;
+                const isSectionLine =
+                  /^(?:\d+\.\s*)?(?:bns\s*)?section\s*[0-9A-Za-z./()-]+/i.test(trimmed);
                 const isHeadingLike =
                   /^#{1,6}\s+/.test(trimmed) ||
-                  /^bns\s*section/i.test(trimmed) ||
-                  /^section\s*\d+/i.test(trimmed) ||
                   /^\*\*.+\*\*$/.test(trimmed) ||
                   /^[A-Za-z][A-Za-z0-9 ()/-]{1,40}:/.test(trimmed);
+
+                if (isSectionLine) {
+                  const leadMatch = trimmed.match(
+                    /^(?:\d+\.\s*)?(?:bns\s*)?section\s*[0-9A-Za-z./()-]+/i
+                  );
+                  const lead = leadMatch ? leadMatch[0] : '';
+                  const remainderRaw = lead ? trimmed.slice(lead.length).trim() : trimmed;
+                  const remainder = remainderRaw.replace(/^[:\-–—]\s*/, '').trim();
+                  return (
+                    <Text key={`line-${index}`} style={styles.resultText}>
+                      <Text style={styles.resultLead}>{lead}</Text>
+                      {remainder ? ` - ${remainder}` : ''}
+                    </Text>
+                  );
+                }
 
                 if (hasLeadHeading) {
                   const lead = line.slice(0, colonIndex).trim();
