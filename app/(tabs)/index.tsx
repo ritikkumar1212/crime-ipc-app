@@ -35,20 +35,27 @@ export default function App() {
   const styles = useMemo(() => createStyles(theme), [theme]);
   const analyzeEndpoint = useMemo(() => {
     const deployedEndpoint = 'https://ipc-backend-j3ux.onrender.com/analyze';
-    const envDefault = process.env.EXPO_PUBLIC_ANALYZE_URL;
+    const sharedEndpoint = process.env.EXPO_PUBLIC_ANALYZE_URL;
+    const webEndpoint = process.env.EXPO_PUBLIC_ANALYZE_URL_WEB;
+    const androidEndpoint = process.env.EXPO_PUBLIC_ANALYZE_URL_ANDROID;
+    const prodEndpoint = process.env.EXPO_PUBLIC_ANALYZE_URL_PROD;
 
-    // Production APK should always hit deployed backend unless explicitly overridden.
+    // Keep web and app outputs aligned by defaulting all platforms to one shared endpoint.
+    if (sharedEndpoint) {
+      return sharedEndpoint;
+    }
+
     if (!__DEV__) {
-      return process.env.EXPO_PUBLIC_ANALYZE_URL_PROD || deployedEndpoint;
+      return prodEndpoint || deployedEndpoint;
     }
 
     if (Platform.OS === 'web') {
-      return process.env.EXPO_PUBLIC_ANALYZE_URL_WEB || envDefault || 'http://localhost:3000/analyze';
+      return webEndpoint || 'http://localhost:3000/analyze';
     }
     if (Platform.OS === 'android') {
-      return process.env.EXPO_PUBLIC_ANALYZE_URL_ANDROID || envDefault || 'http://10.0.2.2:3000/analyze';
+      return androidEndpoint || 'http://10.0.2.2:3000/analyze';
     }
-    return envDefault || deployedEndpoint;
+    return deployedEndpoint;
   }, []);
 
   const buildCacheKey = (
