@@ -16,20 +16,35 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+type ExampleCategory = 'robbery' | 'fraud' | 'assault';
+type ExampleRole = 'self' | 'witness';
+type ExampleCursorKey = `${ExampleRole}:${ExampleCategory}`;
+
 export default function App() {
+  const OUTPUT_SCHEMA_VERSION = 'v3';
   const systemScheme = useColorScheme();
   const [themeMode, setThemeMode] = useState<'light' | 'dark'>(
     systemScheme === 'dark' ? 'dark' : 'light'
   );
-  const [audienceMode, setAudienceMode] = useState<'general' | 'professional'>('general');
+  const audienceMode: 'general' = 'general';
   const [inputText, setInputText] = useState('');
   const [scenarioRole, setScenarioRole] = useState<'self' | 'witness'>('self');
   const [result, setResult] = useState('');
+  const [selectedAnalysisType, setSelectedAnalysisType] = useState<
+    'sections' | 'punishments' | 'next_steps' | null
+  >(null);
   const [loading, setLoading] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [modelPickerVisible, setModelPickerVisible] = useState(true);
   const resultCacheRef = useRef<Record<string, string | undefined>>({});
   const inFlightRef = useRef<Record<string, Promise<string> | undefined>>({});
+  const exampleCursorRef = useRef<Record<ExampleCursorKey, number>>({
+    'self:robbery': 0,
+    'self:fraud': 0,
+    'self:assault': 0,
+    'witness:robbery': 0,
+    'witness:fraud': 0,
+    'witness:assault': 0,
+  });
   const slideAnim = useMemo(() => new Animated.Value(0), []);
 
   const theme = useMemo(() => getTheme(themeMode), [themeMode]);
@@ -44,14 +59,15 @@ export default function App() {
 
   const buildCacheKey = (
     role: 'self' | 'witness',
-    audience: 'general' | 'professional',
+    audience: 'general',
     analysisType: 'sections' | 'punishments' | 'next_steps',
     normalizedInput: string
-  ) => `${audience}::${role}::${analysisType}::${normalizedInput.toLowerCase()}`;
+  ) =>
+    `${OUTPUT_SCHEMA_VERSION}::${audience}::${role}::${analysisType}::${normalizedInput.toLowerCase()}`;
 
   const buildScenarioPrompt = (
     role: 'self' | 'witness',
-    audience: 'general' | 'professional',
+    audience: 'general',
     analysisType: 'sections' | 'punishments' | 'next_steps',
     normalizedInput: string
   ) => {
@@ -60,41 +76,26 @@ export default function App() {
         ? 'Context: This incident is happening to the user or directly affecting them.'
         : 'Context: The user is only a witness/bystander, and the incident is not directly affecting them.';
     const audienceContext =
-      audience === 'general'
-        ? 'Audience: General public. Respond in very simple Hinglish (Roman script), avoid legal jargon, and keep wording easy to understand.'
-        : 'Audience: Legal professional. Respond only in formal legal English with precise statutory and procedural terminology.';
+      'Audience: General public. Respond in very simple Hinglish (Roman script), avoid legal jargon, and keep wording easy to understand.';
 
     if (analysisType === 'sections') {
-      if (audience === 'professional') {
-        return `${normalizedInput}\n\n${roleContext}\n${audienceContext}\nReturn only the relevant BNS section numbers and official section headings as a concise list. No narrative, no advice, no punishments, no extra text. Do not mention IPC.`;
-      }
-      return `${normalizedInput}\n\n${roleContext}\n${audienceContext}\nReturn only the relevant BNS section numbers and section titles as a short list. Do not include explanations, punishments, safety advice, or any extra text. Do not mention IPC.`;
+      return `${normalizedInput}\n\n${roleContext}\n${audienceContext}\nStrictly use simple Hinglish (Roman Hindi). English sentences mat likho; sirf legal terms jaise BNS/Section/FIR allowed hain.\n\nOutput format:\n* Section <number>: <short section title in Hinglish>\n- Kyun lagu hota hai: <ek line, simple Hinglish>\n\nRules:\n1) Sirf BNS sections + why applicable.\n2) Punishment, safety advice, ya next steps mat do.\n3) Do not mention IPC.`;
     }
 
     if (analysisType === 'punishments') {
-      if (audience === 'professional') {
-        return `${normalizedInput}\n\n${roleContext}\n${audienceContext}\nProvide punishment exposure for applicable BNS provisions in formal legal English.\n\nStrict output format (repeat this 3-line block for each section):\n* Section <number>: <official section heading>\n- Legal basis: <concise element-based applicability reason>\n- Sentencing exposure: <imprisonment/fine range in statutory wording>\n\nRules:\n1) No extra headings.\n2) No disclaimer.\n3) No extra bullet types.\n4) Keep it concise and technically precise.\n5) If multiple sections apply, separate each 3-line block with one blank line.\n6) Do not mention IPC.`;
-      }
-      return `${normalizedInput}\n\n${roleContext}\n${audienceContext}\nGive only punishment-focused output for relevant BNS sections in Hinglish. Do not mention IPC.\n\nStrict output format (repeat this 3-line block for each section):\n* Section <number>: <section title>\n- Why it applies: <one short reason>\n- Likely punishment: <jail/fine range in simple words>\n\nRules:\n1) No extra headings.\n2) No legal disclaimer.\n3) No extra bullet types.\n4) Keep it short and practical.\n5) If multiple sections apply, separate each 3-line block with one blank line.`;
+      return `${normalizedInput}\n\n${roleContext}\n${audienceContext}\nStrictly use simple Hinglish (Roman Hindi). English sentences mat likho; sirf legal terms jaise BNS/Section/FIR allowed hain. Do not mention IPC.\n\nStrict output format (repeat this 3-line block for each section):\n* Section <number>: <section title in Hinglish>\n- Kyun lagu hota hai: <one short reason in Hinglish>\n- Sambhavit saza: <jail/fine range in simple Hinglish>\n\nRules:\n1) No extra headings.\n2) No legal disclaimer.\n3) No extra bullet types.\n4) Keep it short and practical.\n5) If multiple sections apply, separate each 3-line block with one blank line.`;
     }
 
     if (role === 'self') {
-      if (audience === 'professional') {
-        return `${normalizedInput}\n\n${roleContext}\n${audienceContext}\nProvide a legally rigorous action plan in English for advising the affected person: (1) immediate protective/legal actions, and (2) post-incident procedural strategy, including reporting, evidence preservation, and counsel steps. Keep it concise. Do not mention IPC.`;
-      }
-      return `${normalizedInput}\n\n${roleContext}\n${audienceContext}\nFocus only on what the user should do next: (1) immediate actions during the incident, and (2) actions after the incident. Keep it practical and safety-first. Do not mention IPC.`;
+      return `${normalizedInput}\n\n${roleContext}\n${audienceContext}\nStrictly use simple Hinglish (Roman Hindi). English sentences mat likho; sirf legal terms jaise BNS/Section/FIR allowed hain.\nFocus only on what the user should do next: (1) immediate actions during the incident, and (2) actions after the incident. Keep it practical and safety-first. Do not mention IPC.`;
     }
 
-    if (audience === 'professional') {
-      return `${normalizedInput}\n\n${roleContext}\n${audienceContext}\nProvide a legally rigorous witness-side action framework in English: (1) immediate safe intervention boundaries, and (2) post-incident procedural steps including reporting channels, evidence integrity, and witness statement protocol. Keep it concise. Do not mention IPC.`;
-    }
-
-    return `${normalizedInput}\n\n${roleContext}\n${audienceContext}\nFocus only on what a witness should do next: (1) immediate safe actions during the incident, and (2) actions after the incident including reporting, preserving evidence, and giving witness statement. Keep it practical and safety-first. Do not mention IPC.`;
+    return `${normalizedInput}\n\n${roleContext}\n${audienceContext}\nStrictly use simple Hinglish (Roman Hindi). English sentences mat likho; sirf legal terms jaise BNS/Section/FIR allowed hain.\nFocus only on what a witness should do next: (1) immediate safe actions during the incident, and (2) actions after the incident including reporting, preserving evidence, and giving witness statement. Keep it practical and safety-first. Do not mention IPC.`;
   };
 
   const fetchAnalysis = async (
     role: 'self' | 'witness',
-    audience: 'general' | 'professional',
+    audience: 'general',
     analysisType: 'sections' | 'punishments' | 'next_steps',
     normalizedInput: string
   ) => {
@@ -143,8 +144,9 @@ export default function App() {
       }
 
       const cleanedResult = stripIpcMentions(data.result);
-      resultCacheRef.current[cacheKey] = cleanedResult;
-      return cleanedResult;
+      const focusedResult = focusAnalysisResult(cleanedResult, analysisType);
+      resultCacheRef.current[cacheKey] = focusedResult;
+      return focusedResult;
     })();
 
     inFlightRef.current[cacheKey] = requestPromise;
@@ -159,7 +161,7 @@ export default function App() {
 
   const prefetchOtherAnalyses = (
     role: 'self' | 'witness',
-    audience: 'general' | 'professional',
+    audience: 'general',
     selectedType: 'sections' | 'punishments' | 'next_steps',
     normalizedInput: string
   ) => {
@@ -175,6 +177,7 @@ export default function App() {
   const getIpcSections = async (
     analysisType: 'sections' | 'punishments' | 'next_steps'
   ) => {
+    setSelectedAnalysisType(analysisType);
     const normalizedInput = inputText.trim();
     if (!normalizedInput) return;
 
@@ -213,18 +216,13 @@ export default function App() {
     setThemeMode((prev) => (prev === 'dark' ? 'light' : 'dark'));
   };
 
-  const handleUseExample = (text: string) => {
-    setInputText(text);
-  };
-
-  const applyAudienceMode = (mode: 'general' | 'professional') => {
-    setAudienceMode(mode);
-    setResult('');
-  };
-
-  const handleInitialModelChoice = (mode: 'general' | 'professional') => {
-    applyAudienceMode(mode);
-    setModelPickerVisible(false);
+  const handleUseExample = (category: ExampleCategory) => {
+    const scenarios = EXAMPLE_SCENARIOS[scenarioRole][category];
+    if (!scenarios?.length) return;
+    const cursorKey = `${scenarioRole}:${category}` as ExampleCursorKey;
+    const cursor = exampleCursorRef.current[cursorKey] || 0;
+    setInputText(scenarios[cursor]);
+    exampleCursorRef.current[cursorKey] = (cursor + 1) % scenarios.length;
   };
 
   const openMenu = () => {
@@ -254,34 +252,10 @@ export default function App() {
     inputRange: [0, 1],
     outputRange: [0, 1],
   });
-  const resultLines = useMemo(() => result.split('\n'), [result]);
-
-  if (modelPickerVisible) {
-    return (
-      <SafeAreaView style={[styles.container, styles.modelPickerScreen]}>
-        <StatusBar hidden={true} translucent />
-        <View style={styles.modelPickerCard}>
-          <Text style={styles.modelPickerTitle}>Which version do you want to use?</Text>
-          <TouchableOpacity
-            style={styles.modelPickerOption}
-            onPress={() => handleInitialModelChoice('general')}>
-            <Text style={styles.modelPickerOptionTitle}>Nyay Sathi</Text>
-            <Text style={styles.modelPickerOptionText}>
-              Simple Hinglish guidance for general users.
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.modelPickerOption}
-            onPress={() => handleInitialModelChoice('professional')}>
-            <Text style={styles.modelPickerOptionTitle}>Nyay Sathi Pro</Text>
-            <Text style={styles.modelPickerOptionText}>
-              Formal legal English analysis for professional use.
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  const structuredResult = useMemo(
+    () => buildStructuredResult(result, selectedAnalysisType),
+    [result, selectedAnalysisType]
+  );
 
   return (
     <SafeAreaView style={styles.container}>
@@ -320,37 +294,6 @@ export default function App() {
             >
               <Text style={styles.menuItemText}>Contact a Lawyer</Text>
             </TouchableOpacity>
-            <Text style={styles.menuSectionLabel}>Interface</Text>
-            <TouchableOpacity
-              style={[styles.menuItem, audienceMode === 'general' && styles.menuItemActive]}
-              onPress={() => {
-                applyAudienceMode('general');
-                closeMenu();
-              }}
-            >
-              <Text
-                style={[
-                  styles.menuItemText,
-                  audienceMode === 'general' && styles.menuItemTextActive,
-                ]}>
-                General Public
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.menuItem, audienceMode === 'professional' && styles.menuItemActive]}
-              onPress={() => {
-                applyAudienceMode('professional');
-                closeMenu();
-              }}
-            >
-              <Text
-                style={[
-                  styles.menuItemText,
-                  audienceMode === 'professional' && styles.menuItemTextActive,
-                ]}>
-                Legal Professional
-              </Text>
-            </TouchableOpacity>
             <TouchableOpacity
               style={styles.menuItem}
               onPress={() => {
@@ -366,17 +309,11 @@ export default function App() {
         </Pressable>
       )}
 
-      <View style={styles.content}>
-        <View style={styles.header}>
-          <Text style={styles.heading}>
-            {audienceMode === 'professional' ? 'Nyay Sathi Pro' : 'Nyay Sathi'}
-          </Text>
-          <Text style={styles.subheading}>
-            {audienceMode === 'professional'
-              ? 'Draft facts and receive formal legal analysis'
-              : 'Draft a scenario and receive legal help fast'}
-          </Text>
-        </View>
+        <View style={styles.content}>
+          <View style={styles.header}>
+            <Text style={styles.heading}>Nyay Sathi</Text>
+            <Text style={styles.subheading}>Draft a scenario and receive legal help fast</Text>
+          </View>
 
         <View style={styles.card}>
           <View style={styles.inputHeader}>
@@ -392,7 +329,7 @@ export default function App() {
                   onPress={() => setScenarioRole(mode.value)}
                 >
                   <Text style={[styles.modeChipText, active && styles.modeChipTextActive]}>
-                    {audienceMode === 'professional' ? mode.proLabel : mode.label}
+                    {mode.label}
                   </Text>
                 </TouchableOpacity>
               );
@@ -400,11 +337,7 @@ export default function App() {
           </View>
           <TextInput
             style={styles.input}
-            placeholder={
-              audienceMode === 'professional'
-                ? 'Enter material facts, chronology, intent, parties, and available evidence...'
-                : 'Describe the crime scenario in detail...'
-            }
+            placeholder={'Describe the crime scenario in detail...'}
             placeholderTextColor={theme.muted}
             multiline
             value={inputText}
@@ -413,11 +346,11 @@ export default function App() {
           />
           <View style={styles.actionsRow}>
             <View style={styles.chipsRow}>
-              {EXAMPLES.map((example) => (
+              {EXAMPLE_BUTTONS.map((example) => (
                 <TouchableOpacity
-                  key={example.label}
+                  key={example.key}
                   style={styles.chip}
-                  onPress={() => handleUseExample(example.text)}
+                  onPress={() => handleUseExample(example.key)}
                 >
                   <Text style={styles.chipText}>{example.label}</Text>
                 </TouchableOpacity>
@@ -432,13 +365,9 @@ export default function App() {
             </TouchableOpacity>
           </View>
           <Text style={styles.helperText}>
-            {audienceMode === 'professional'
-              ? scenarioRole === 'self'
-                ? 'Tip: include mens rea indicators, injury grading, timeline, and evidentiary material.'
-                : 'Tip: include witness vantage point, timeline, identities, and evidence custody details.'
-              : scenarioRole === 'self'
-                ? 'Tip: include intent, weapon used, and injuries for best results.'
-                : 'Tip: include place, time, people involved, vehicle details, and what you observed.'}
+            {scenarioRole === 'self'
+              ? 'Tip: include intent, weapon used, and injuries for best results.'
+              : 'Tip: include place, time, people involved, vehicle details, and what you observed.'}
           </Text>
         </View>
 
@@ -451,7 +380,7 @@ export default function App() {
             onPress={() => getIpcSections('sections')}
             disabled={!inputText.trim()}
           >
-            <Text style={styles.buttonText}>BNS Sections</Text>
+            <Text style={styles.buttonText}>BNS Sections + Why It Applies</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -491,53 +420,25 @@ export default function App() {
             <ActivityIndicator size="large" color={theme.accent} />
           ) : result ? (
             <View style={styles.resultLinesWrap}>
-              {resultLines.map((line, index) => {
-                const trimmed = line.trim();
-                if (!trimmed) {
-                  return <View key={`line-${index}`} style={styles.resultSpacer} />;
-                }
-
-                const colonIndex = line.indexOf(':');
-                const hasLeadHeading = colonIndex > 0 && colonIndex < 45;
-                const isSectionLine =
-                  /^(?:\d+\.\s*)?(?:bns\s*)?section\s*[0-9A-Za-z./()-]+/i.test(trimmed);
-                const isHeadingLike =
-                  /^#{1,6}\s+/.test(trimmed) ||
-                  /^\*\*.+\*\*$/.test(trimmed) ||
-                  /^[A-Za-z][A-Za-z0-9 ()/-]{1,40}:/.test(trimmed);
-
-                if (isSectionLine) {
-                  const leadMatch = trimmed.match(
-                    /^(?:\d+\.\s*)?(?:bns\s*)?section\s*[0-9A-Za-z./()-]+/i
-                  );
-                  const lead = leadMatch ? leadMatch[0] : '';
-                  const remainderRaw = lead ? trimmed.slice(lead.length).trim() : trimmed;
-                  const remainder = remainderRaw.replace(/^[:\-–—]\s*/, '').trim();
-                  return (
-                    <Text key={`line-${index}`} style={styles.resultText}>
-                      <Text style={styles.resultLead}>{lead}</Text>
-                      {remainder ? ` - ${remainder}` : ''}
-                    </Text>
-                  );
-                }
-
-                if (hasLeadHeading) {
-                  const lead = line.slice(0, colonIndex).trim();
-                  const rest = line.slice(colonIndex + 1).trim();
-                  return (
-                    <Text key={`line-${index}`} style={styles.resultText}>
-                      <Text style={styles.resultLead}>{lead}:</Text>
-                      {rest ? ` ${rest}` : ''}
-                    </Text>
-                  );
-                }
-
+              <Text style={styles.resultHeadingLine}>{structuredResult.title}</Text>
+              {structuredResult.items.map((item, index) => {
+                const highlighted = splitSectionLead(item);
                 return (
-                  <Text
-                    key={`line-${index}`}
-                    style={isHeadingLike ? styles.resultHeadingLine : styles.resultText}>
-                    {line}
-                  </Text>
+                  <View key={`item-${index}`} style={styles.resultItemRow}>
+                    <Text style={styles.resultBullet}>-</Text>
+                    {selectedAnalysisType === 'sections' ? (
+                      highlighted.highlight ? (
+                        <Text style={styles.resultText}>
+                          <Text style={styles.resultLead}>{highlighted.lead}</Text>
+                          {highlighted.detail ? `: ${highlighted.detail}` : ''}
+                        </Text>
+                      ) : (
+                        <Text style={styles.resultText}>{highlighted.detail}</Text>
+                      )
+                    ) : (
+                      <Text style={styles.resultText}>{item}</Text>
+                    )}
+                  </View>
                 );
               })}
             </View>
@@ -565,24 +466,371 @@ const stripIpcMentions = (text: string) =>
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
-const EXAMPLES = [
-  {
-    label: 'Robbery',
-    text: 'A masked person broke into a jewelry shop at night, threatened the guard with a knife, and took gold ornaments.',
-  },
-  {
-    label: 'Fraud',
-    text: 'A person created fake documents to obtain a bank loan and then disappeared without repayment.',
-  },
-  {
-    label: 'Assault',
-    text: 'During a street argument, one individual hit another with a metal rod causing serious injuries.',
-  },
+const focusAnalysisResult = (
+  text: string,
+  analysisType: 'sections' | 'punishments' | 'next_steps'
+) => {
+  const normalized = text.replace(/\r\n/g, '\n').trim();
+  if (!normalized) return normalized;
+
+  const lines = normalized.split('\n');
+  const sectionHeadings = [
+    'relevant bns sections',
+    'bns sections',
+    'relevant sections',
+    'applicable sections',
+  ];
+  const punishmentHeadings = [
+    'likely punishments',
+    'punishments',
+    'punishment',
+    'sentencing exposure',
+    'sentencing',
+  ];
+  const nextStepHeadings = [
+    'immediate actions',
+    'what to do next',
+    'next steps',
+    'steps after the incident',
+    'steps after incident',
+    'post-incident steps',
+    'post incident steps',
+    'safety/legality caveats',
+    'safety caveats',
+  ];
+
+  const headingOf = (line: string) =>
+    line
+      .toLowerCase()
+      .replace(/[`*_>#-]/g, ' ')
+      .replace(/:/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const isHeadingMatch = (line: string, headingKeys: string[]) => {
+    const normalizedHeading = headingOf(line);
+    return headingKeys.some((key) => normalizedHeading.includes(key));
+  };
+
+  const findFirstHeadingIndex = (headingKeys: string[]) =>
+    lines.findIndex((line) => isHeadingMatch(line, headingKeys));
+
+  const extractHeadingBlock = (startKeys: string[], stopKeys: string[]) => {
+    const start = findFirstHeadingIndex(startKeys);
+    if (start < 0) return '';
+    let end = lines.length;
+    for (let i = start + 1; i < lines.length; i += 1) {
+      if (isHeadingMatch(lines[i], stopKeys)) {
+        end = i;
+        break;
+      }
+    }
+    return lines.slice(start, end).join('\n').trim();
+  };
+
+  if (analysisType === 'sections') {
+    const fromHeadings = extractHeadingBlock(sectionHeadings, [
+      ...punishmentHeadings,
+      ...nextStepHeadings,
+    ]);
+    if (fromHeadings) return fromHeadings;
+
+    const fallback = lines.filter(
+      (line) =>
+        /\bsection\s*[0-9A-Za-z./()-]+/i.test(line) &&
+        !/\b(punishment|sentencing|imprisonment|jail|fine|immediate|next steps?|what to do)\b/i.test(
+          line
+        )
+    );
+    return fallback.length ? fallback.join('\n').trim() : normalized;
+  }
+
+  if (analysisType === 'punishments') {
+    const fromHeadings = extractHeadingBlock(punishmentHeadings, nextStepHeadings);
+    if (fromHeadings) return fromHeadings;
+
+    const fallback = lines.filter((line) =>
+      /\b(punishment|sentencing|imprisonment|jail|fine|saza)\b/i.test(line)
+    );
+    return fallback.length ? fallback.join('\n').trim() : normalized;
+  }
+
+  const firstNextStepIndex = findFirstHeadingIndex(nextStepHeadings);
+  if (firstNextStepIndex >= 0) {
+    return lines.slice(firstNextStepIndex).join('\n').trim();
+  }
+
+  const fallback = lines.filter((line) =>
+    /\b(immediate|next steps?|what to do|report|police|fir|evidence|witness|safety|after the incident)\b/i.test(
+      line
+    )
+  );
+  return fallback.length ? fallback.join('\n').trim() : normalized;
+};
+
+const splitSectionLead = (item: string) => {
+  const normalizedItem = item.replace(/\s+/g, ' ').trim();
+  const sectionMatch = normalizedItem.match(/^(section|charge)\s*[0-9A-Za-z./()-]+/i);
+  if (!sectionMatch) {
+    return { lead: '', detail: normalizedItem, highlight: false };
+  }
+  const lead = sectionMatch[0].trim();
+  const detail = normalizedItem.slice(lead.length).trim().replace(/^[:\-]\s*/, '');
+  return { lead, detail, highlight: true };
+};
+
+const buildStructuredResult = (
+  text: string,
+  analysisType: 'sections' | 'punishments' | 'next_steps' | null
+) => {
+  const normalizedText = text.replace(/\r\n/g, '\n').trim();
+  if (!normalizedText) {
+    return { title: 'Analysis', items: [] as string[] };
+  }
+
+  const normalizeLine = (line: string) =>
+    line
+      .replace(/^\s*[*\-+]\s*/, '')
+      .replace(/^\s*\d+[.)]\s*/, '')
+      .replace(/^\s*#{1,6}\s*/, '')
+      .replace(/\*\*/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const cleanGeneralLine = (line: string) =>
+    line
+      .replace(/\s*\[[^\]]*]/g, '')
+      .replace(/\([^)]*\)/g, '')
+      .replace(/applies because/gi, 'kyunki')
+      .replace(/why it applies/gi, 'kyun lagu hota hai')
+      .replace(/likely punishment/gi, 'sambhavit saza')
+      .replace(/[\u0900-\u097F]+/g, ' ')
+      .replace(/^[\s:;,-]+/, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+
+  const headingOf = (line: string) =>
+    line
+      .toLowerCase()
+      .replace(/[`*_>#-]/g, ' ')
+      .replace(/:/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const isHeadingLine = (line: string) => {
+    const normalizedHeading = headingOf(line);
+    return (
+      normalizedHeading.startsWith('crime scenario') ||
+      normalizedHeading === 'relevant bns sections' ||
+      normalizedHeading === 'bns sections' ||
+      normalizedHeading === 'likely punishments' ||
+      normalizedHeading === 'punishments' ||
+      normalizedHeading === 'punishment' ||
+      normalizedHeading === 'immediate actions' ||
+      normalizedHeading === 'what to do next' ||
+      normalizedHeading === 'next steps' ||
+      normalizedHeading === 'steps after the incident' ||
+      normalizedHeading === 'steps after incident' ||
+      normalizedHeading === 'post incident steps' ||
+      normalizedHeading === 'safety legality caveats' ||
+      normalizedHeading === 'safety caveats'
+    );
+  };
+
+  const uniqueItems = (items: string[]) => {
+    const seen = new Set<string>();
+    const deduped: string[] = [];
+    items.forEach((item) => {
+      const normalizedItem = item.trim();
+      if (!normalizedItem) return;
+      const key = normalizedItem.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      deduped.push(normalizedItem);
+    });
+    return deduped;
+  };
+
+  const lines = normalizedText.split('\n').map(normalizeLine).filter(Boolean);
+  const contentLines = lines.filter((line) => !isHeadingLine(line)).map(cleanGeneralLine).filter(Boolean);
+
+  const sectionPattern = /\bsection\s*([0-9A-Za-z./()-]+)\b/i;
+  const reasonPattern = /\b(kyun|kyunki|isliye|lagu hota hai|because|applies)\b/i;
+  const punishmentPattern = /\b(saza|jail|fine|imprisonment|years?)\b/i;
+  const actionPattern = /\b(police|fir|report|evidence|medical|witness|safety|turant|immediate|step|karein|karna chahiye)\b/i;
+
+  const parseSectionEntries = () => {
+    const entries: Array<{ number: string; title: string; reason: string; punishment: string }> = [];
+    for (let i = 0; i < contentLines.length; i += 1) {
+      const line = contentLines[i];
+      const regexMatch = /section\s*([0-9A-Za-z./()-]+)/i.exec(line);
+      if (!regexMatch) continue;
+
+      const number = regexMatch[1];
+      const matchIndex = regexMatch.index ?? 0;
+      const matchedTextLength = regexMatch[0].length;
+      const afterSection = line.slice(matchIndex + matchedTextLength);
+      let title = afterSection.replace(/^[:\-\s]+/, '').trim();
+      let reason = '';
+      let punishment = '';
+
+      if (reasonPattern.test(title)) {
+        const idx = title.search(reasonPattern);
+        reason = title.slice(idx).replace(/^[-:\s]+/, '').trim();
+        title = title.slice(0, idx).trim();
+      }
+      if (punishmentPattern.test(title)) {
+        punishment = title;
+        title = '';
+      }
+
+      const nextLine = contentLines[i + 1];
+      if (nextLine && !sectionPattern.test(nextLine)) {
+        if (!reason && reasonPattern.test(nextLine)) {
+          reason = nextLine.replace(/^[-:\s]+/, '').trim();
+          i += 1;
+        } else if (!punishment && punishmentPattern.test(nextLine)) {
+          punishment = nextLine.replace(/^[-:\s]+/, '').trim();
+          i += 1;
+        }
+      }
+
+      entries.push({ number, title, reason, punishment });
+    }
+
+    const deduped = new Map<string, { number: string; title: string; reason: string; punishment: string }>();
+    entries.forEach((entry) => {
+      const prev = deduped.get(entry.number);
+      if (!prev) {
+        deduped.set(entry.number, entry);
+        return;
+      }
+      deduped.set(entry.number, {
+        number: entry.number,
+        title: prev.title || entry.title,
+        reason: prev.reason || entry.reason,
+        punishment: prev.punishment || entry.punishment,
+      });
+    });
+    return Array.from(deduped.values());
+  };
+
+  const entries = parseSectionEntries();
+
+  if (analysisType === 'sections') {
+    const items: string[] = [];
+    entries.slice(0, 6).forEach((entry) => {
+      items.push(`Section ${entry.number}: ${entry.title || 'Relevant BNS section'}`);
+      items.push(`Kyun lagu hota hai: ${entry.reason || 'Diye gaye facts ke basis par yeh section lagu hota hai.'}`);
+    });
+    return {
+      title: 'BNS Sections + Kyun Lagu Hota Hai',
+      items: items.length ? items : ['Is scenario ke liye clear BNS section nahi mila.'],
+    };
+  }
+
+  if (analysisType === 'punishments') {
+    const itemsFromSections = entries
+      .map((entry) => {
+        const punish =
+          entry.punishment ||
+          contentLines.find(
+            (line) => line.match(sectionPattern)?.[1] === entry.number && punishmentPattern.test(line)
+          ) ||
+          '';
+        if (!punish) return '';
+        return `Section ${entry.number}: ${punish.replace(/^section\s*[0-9A-Za-z./()-]+\s*[:\-]?\s*/i, '')}`;
+      })
+      .filter(Boolean);
+
+    const fallbackItems = contentLines
+      .filter((line) => punishmentPattern.test(line))
+      .slice(0, 8);
+
+    const items = uniqueItems(itemsFromSections.length ? itemsFromSections : fallbackItems);
+    return {
+      title: 'Sambhavit Saza',
+      items: items.length ? items : ['Is scenario ke liye clear saza details nahi mili.'],
+    };
+  }
+
+  if (analysisType === 'next_steps') {
+    const items = uniqueItems(
+      contentLines
+        .filter((line) => actionPattern.test(line))
+        .slice(0, 8)
+        .map((line) => line.replace(/^[-:\s]+/, '').trim())
+    );
+    return {
+      title: 'Ab Kya Karein',
+      items: items.length ? items : ['Is scenario ke liye clear actionable steps nahi mile.'],
+    };
+  }
+
+  return {
+    title: 'Analysis',
+    items: uniqueItems(contentLines).slice(0, 8),
+  };
+};
+
+const EXAMPLE_BUTTONS: Array<{ key: ExampleCategory; label: string }> = [
+  { key: 'robbery', label: 'Robbery' },
+  { key: 'fraud', label: 'Fraud' },
+  { key: 'assault', label: 'Assault' },
 ];
 
+const EXAMPLE_SCENARIOS: Record<ExampleRole, Record<ExampleCategory, string[]>> = {
+  self: {
+    robbery: [
+      'Kal raat meri jewellery shop me do masked log ghus gaye, mujhe knife dikha kar gold ornaments aur cash loot kar bhaag gaye.',
+      'Main ATM se paise nikal kar nikal raha tha, tab 3 logon ne gher kar mera bag aur phone chheen liya.',
+      'Mere ghar ke bahar car roki gayi, mujhe dhamka kar wallet, chain aur cash le liya gaya.',
+      'Main medical store band kar raha tha, tab do log pistol dikha kar din bhar ki sale lekar bhag gaye.',
+      'Online delivery dene gaya tha, wahan mujhe dhamka kar parcel ke saath mera wallet bhi loot liya gaya.',
+    ],
+    fraud: [
+      'Mujhe govt job dilane ke naam par 3 lakh rupaye liye gaye aur phir agent ne phone band kar diya.',
+      'Maine online product ka full payment kiya, lekin seller ne na product bheja na refund diya.',
+      'Maine flat booking ke liye advance diya, baad me pata chala papers fake the aur builder gayab ho gaya.',
+      'Mere paas bank officer ban kar call aaya, OTP share karte hi mere account se paise kat gaye.',
+      'Investment plan me high return ka promise karke mujhse paise liye aur company office bandh kar diya gaya.',
+    ],
+    assault: [
+      'Road par jhagde me mujhe iron rod se mara gaya jis se mere sar par gehri chot aa gayi.',
+      'Traffic dispute me ek driver ne mujhe helmet se baar-baar mara aur mera haath fracture ho gaya.',
+      'Mohalle me purani dushmani ke chakkar me 3 logon ne milkar mujhe lathi se peeta.',
+      'Land dispute par baat karte waqt padosi ne mujhe dhakka dekar chaku se attack kiya.',
+      'Raat ko ghar lautte waqt do logon ne mujhe gher kar punches aur kicks se maara.',
+    ],
+  },
+  witness: {
+    robbery: [
+      'Mere saamne jewellery shop me do masked log ghus kar guard ko knife se dhamka rahe the aur gold loot kar bhaag gaye.',
+      'Main road par tha jab do bikers ne ek aadmi ko rok kar uska bag aur mobile chheen liya.',
+      'ATM ke bahar mere saamne teen logon ne ek vyakti ko gher kar usse cash aur wallet le liya.',
+      'Showroom ke bahar maine dekha do log owner ko dara kar locker se cash nikalwa kar bhag gaye.',
+      'Highway par mere saamne family ki car rok kar unse jewellery aur paise loot liye gaye.',
+    ],
+    fraud: [
+      'Mere saamne mere dost se govt job ke naam par paise liye gaye aur baad me agent gayab ho gaya.',
+      'Maine dekha seller ne advance payment lekar fake invoice diya aur product deliver nahi kiya.',
+      'Mere saamne property deal me fake papers dikhakar buyer se paise liye gaye.',
+      'Office me maine dekha ek aadmi ne bank call ke bahane OTP lekar victim ke account se paise nikale.',
+      'Mere saamne local group me investment scam chala kar logon se paisa collect karke organizer bhaag gaya.',
+    ],
+    assault: [
+      'Mere saamne road par jhagde me ek aadmi ne dusre ko iron rod se mara.',
+      'Traffic signal par maine dekha ek driver ne dusre driver ko helmet se zor se maara.',
+      'Mere saamne teen log milkar ek ladke ko lathi se peet rahe the.',
+      'Mohalle me land dispute ke dauran maine padosi ko chaku se hamla karte dekha.',
+      'School gate ke paas mere saamne do logon ne ek vyakti ko gher kar maar-peet ki.',
+    ],
+  },
+};
+
 const SCENARIO_MODES = [
-  { label: 'Mere Saath Hua', proLabel: 'Happened With Me', value: 'self' as const },
-  { label: 'Mere Saamne Hua', proLabel: 'Happened In Front Of Me', value: 'witness' as const },
+  { label: 'Mere Saath Hua', value: 'self' as const },
+  { label: 'Mere Saamne Hua', value: 'witness' as const },
 ];
 
 const ANALYSIS_TYPES = ['sections', 'punishments', 'next_steps'] as const;
@@ -692,29 +940,11 @@ const createStyles = (theme: ReturnType<typeof getTheme>) =>
       paddingHorizontal: 10,
       borderRadius: 10,
     },
-    menuItemActive: {
-      backgroundColor: theme.surfaceAlt,
-      borderWidth: 1,
-      borderColor: theme.border,
-    },
-    menuSectionLabel: {
-      marginTop: 10,
-      marginBottom: 6,
-      color: theme.muted,
-      fontSize: 11,
-      fontWeight: '700',
-      letterSpacing: 0.5,
-      textTransform: 'uppercase',
-      fontFamily: Platform.select({ ios: 'Avenir Next', android: 'sans-serif-medium' }),
-    },
     menuItemText: {
       color: theme.text,
       fontSize: 14,
       fontWeight: '600',
       fontFamily: Platform.select({ ios: 'Avenir Next', android: 'sans-serif-medium' }),
-    },
-    menuItemTextActive: {
-      color: theme.accent,
     },
     menuOverlay: {
       position: 'absolute',
@@ -723,52 +953,6 @@ const createStyles = (theme: ReturnType<typeof getTheme>) =>
       right: 0,
       bottom: 0,
       zIndex: 9,
-    },
-    modelPickerScreen: {
-      backgroundColor: 'rgba(9, 14, 26, 0.94)',
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingHorizontal: 20,
-    },
-    modelPickerCard: {
-      width: '100%',
-      maxWidth: 460,
-      borderRadius: 18,
-      padding: 18,
-      backgroundColor: theme.surface,
-      borderWidth: 1,
-      borderColor: theme.border,
-      gap: 12,
-      ...getShadow(theme, 18, 8, 6, themeModeShadowOpacity(theme)),
-    },
-    modelPickerTitle: {
-      color: theme.text,
-      fontSize: 19,
-      fontWeight: '700',
-      textAlign: 'center',
-      marginBottom: 6,
-      fontFamily: Platform.select({ ios: 'Avenir Next', android: 'sans-serif-medium' }),
-    },
-    modelPickerOption: {
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: theme.border,
-      backgroundColor: theme.surfaceAlt,
-      paddingVertical: 12,
-      paddingHorizontal: 12,
-      gap: 4,
-    },
-    modelPickerOptionTitle: {
-      color: theme.text,
-      fontSize: 15,
-      fontWeight: '700',
-      fontFamily: Platform.select({ ios: 'Avenir Next', android: 'sans-serif-medium' }),
-    },
-    modelPickerOptionText: {
-      color: theme.muted,
-      fontSize: 12,
-      lineHeight: 18,
-      fontFamily: Platform.select({ ios: 'Avenir Next', android: 'sans-serif-light' }),
     },
     menuScrim: {
       ...StyleSheet.absoluteFillObject,
@@ -967,16 +1151,25 @@ const createStyles = (theme: ReturnType<typeof getTheme>) =>
       fontFamily: Platform.select({ ios: 'Avenir Next', android: 'sans-serif-medium' }),
     },
     resultText: {
+      flex: 1,
       fontSize: 15,
       color: theme.text,
       lineHeight: 22,
       fontFamily: Platform.select({ ios: 'Georgia', android: 'serif' }),
     },
     resultLinesWrap: {
-      gap: 4,
+      gap: 8,
     },
-    resultSpacer: {
-      height: 8,
+    resultItemRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 8,
+    },
+    resultBullet: {
+      color: theme.muted,
+      fontSize: 15,
+      lineHeight: 22,
+      fontWeight: '700',
     },
     resultHeadingLine: {
       fontSize: 15,
