@@ -23,19 +23,19 @@ function AnimatedSplash({ onComplete }: { onComplete: () => void }) {
     Animated.parallel([
       Animated.timing(opacity, {
         toValue: 1,
-        duration: 1040,
+        duration: 1300,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
       Animated.timing(scale, {
         toValue: 1,
-        duration: 1040,
+        duration: 1300,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
     ]).start(({ finished }) => {
       if (finished) {
-        setTimeout(onComplete, 260);
+        setTimeout(onComplete, 400);
       }
     });
   }, [onComplete, opacity, scale]);
