@@ -27,6 +27,7 @@ export default function App() {
   const [result, setResult] = useState('');
   const [loading, setLoading] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [modelPickerVisible, setModelPickerVisible] = useState(true);
   const resultCacheRef = useRef<Record<string, string | undefined>>({});
   const inFlightRef = useRef<Record<string, Promise<string> | undefined>>({});
   const slideAnim = useMemo(() => new Animated.Value(0), []);
@@ -36,26 +37,9 @@ export default function App() {
   const analyzeEndpoint = useMemo(() => {
     const deployedEndpoint = 'https://ipc-backend-j3ux.onrender.com/analyze';
     const sharedEndpoint = process.env.EXPO_PUBLIC_ANALYZE_URL;
-    const webEndpoint = process.env.EXPO_PUBLIC_ANALYZE_URL_WEB;
-    const androidEndpoint = process.env.EXPO_PUBLIC_ANALYZE_URL_ANDROID;
     const prodEndpoint = process.env.EXPO_PUBLIC_ANALYZE_URL_PROD;
-
-    // Keep web and app outputs aligned by defaulting all platforms to one shared endpoint.
-    if (sharedEndpoint) {
-      return sharedEndpoint;
-    }
-
-    if (!__DEV__) {
-      return prodEndpoint || deployedEndpoint;
-    }
-
-    if (Platform.OS === 'web') {
-      return webEndpoint || 'http://localhost:3000/analyze';
-    }
-    if (Platform.OS === 'android') {
-      return androidEndpoint || 'http://10.0.2.2:3000/analyze';
-    }
-    return deployedEndpoint;
+    // Force one backend across web/app/Expo Go so outputs stay aligned.
+    return sharedEndpoint || prodEndpoint || deployedEndpoint;
   }, []);
 
   const buildCacheKey = (
@@ -233,6 +217,16 @@ export default function App() {
     setInputText(text);
   };
 
+  const applyAudienceMode = (mode: 'general' | 'professional') => {
+    setAudienceMode(mode);
+    setResult('');
+  };
+
+  const handleInitialModelChoice = (mode: 'general' | 'professional') => {
+    applyAudienceMode(mode);
+    setModelPickerVisible(false);
+  };
+
   const openMenu = () => {
     setMenuOpen(true);
     Animated.timing(slideAnim, {
@@ -261,6 +255,33 @@ export default function App() {
     outputRange: [0, 1],
   });
   const resultLines = useMemo(() => result.split('\n'), [result]);
+
+  if (modelPickerVisible) {
+    return (
+      <SafeAreaView style={[styles.container, styles.modelPickerScreen]}>
+        <StatusBar hidden={true} translucent />
+        <View style={styles.modelPickerCard}>
+          <Text style={styles.modelPickerTitle}>Which version do you want to use?</Text>
+          <TouchableOpacity
+            style={styles.modelPickerOption}
+            onPress={() => handleInitialModelChoice('general')}>
+            <Text style={styles.modelPickerOptionTitle}>Nyay Sathi</Text>
+            <Text style={styles.modelPickerOptionText}>
+              Simple Hinglish guidance for general users.
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.modelPickerOption}
+            onPress={() => handleInitialModelChoice('professional')}>
+            <Text style={styles.modelPickerOptionTitle}>Nyay Sathi Pro</Text>
+            <Text style={styles.modelPickerOptionText}>
+              Formal legal English analysis for professional use.
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -303,8 +324,7 @@ export default function App() {
             <TouchableOpacity
               style={[styles.menuItem, audienceMode === 'general' && styles.menuItemActive]}
               onPress={() => {
-                setAudienceMode('general');
-                setResult('');
+                applyAudienceMode('general');
                 closeMenu();
               }}
             >
@@ -319,8 +339,7 @@ export default function App() {
             <TouchableOpacity
               style={[styles.menuItem, audienceMode === 'professional' && styles.menuItemActive]}
               onPress={() => {
-                setAudienceMode('professional');
-                setResult('');
+                applyAudienceMode('professional');
                 closeMenu();
               }}
             >
@@ -443,7 +462,7 @@ export default function App() {
             onPress={() => getIpcSections('punishments')}
             disabled={!inputText.trim()}
           >
-            <Text style={styles.buttonText}>Punishments</Text>
+            <Text style={styles.buttonText}>Punishment</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -705,6 +724,52 @@ const createStyles = (theme: ReturnType<typeof getTheme>) =>
       bottom: 0,
       zIndex: 9,
     },
+    modelPickerScreen: {
+      backgroundColor: 'rgba(9, 14, 26, 0.94)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 20,
+    },
+    modelPickerCard: {
+      width: '100%',
+      maxWidth: 460,
+      borderRadius: 18,
+      padding: 18,
+      backgroundColor: theme.surface,
+      borderWidth: 1,
+      borderColor: theme.border,
+      gap: 12,
+      ...getShadow(theme, 18, 8, 6, themeModeShadowOpacity(theme)),
+    },
+    modelPickerTitle: {
+      color: theme.text,
+      fontSize: 19,
+      fontWeight: '700',
+      textAlign: 'center',
+      marginBottom: 6,
+      fontFamily: Platform.select({ ios: 'Avenir Next', android: 'sans-serif-medium' }),
+    },
+    modelPickerOption: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surfaceAlt,
+      paddingVertical: 12,
+      paddingHorizontal: 12,
+      gap: 4,
+    },
+    modelPickerOptionTitle: {
+      color: theme.text,
+      fontSize: 15,
+      fontWeight: '700',
+      fontFamily: Platform.select({ ios: 'Avenir Next', android: 'sans-serif-medium' }),
+    },
+    modelPickerOptionText: {
+      color: theme.muted,
+      fontSize: 12,
+      lineHeight: 18,
+      fontFamily: Platform.select({ ios: 'Avenir Next', android: 'sans-serif-light' }),
+    },
     menuScrim: {
       ...StyleSheet.absoluteFillObject,
       backgroundColor: 'rgba(8, 12, 24, 0.35)',
@@ -832,15 +897,18 @@ const createStyles = (theme: ReturnType<typeof getTheme>) =>
     },
     buttonRow: {
       flexDirection: 'row',
-      gap: 12,
+      gap: Platform.select({ android: 8, default: 12 }),
       marginTop: 18,
       marginBottom: 18,
     },
     optionButton: {
       flex: 1,
       backgroundColor: theme.accent,
-      padding: 16,
+      paddingVertical: Platform.select({ android: 12, default: 16 }),
+      paddingHorizontal: Platform.select({ android: 8, default: 16 }),
       borderRadius: 14,
+      justifyContent: 'center',
+      minHeight: Platform.select({ android: 86, default: 0 }),
       ...getShadow(theme, 16, 6, 4, themeModeShadowOpacity(theme)),
     },
     buttonDisabled: { opacity: 0.6 },
@@ -848,7 +916,10 @@ const createStyles = (theme: ReturnType<typeof getTheme>) =>
       color: theme.buttonText,
       textAlign: 'center',
       fontWeight: '700',
-      letterSpacing: 0.4,
+      fontSize: Platform.select({ android: 13, default: 14 }),
+      lineHeight: Platform.select({ android: 18, default: 20 }),
+      letterSpacing: Platform.select({ android: 0.2, default: 0.4 }),
+      includeFontPadding: false,
       fontFamily: Platform.select({ ios: 'Avenir Next', android: 'sans-serif-medium' }),
     },
     resultBox: {
